@@ -27,7 +27,7 @@ Based on https://github.com/shivsahni/NSBrute
  
  * `-p` or `--profile` for aws profile_name
  
- Then you need to provide the domain to be hijacked trough the `-d` or `--domain` parameter
+ Then you need to provide the domain to be hijacked through the `-d` or `--domain` parameter
  
  ### Example:
  
