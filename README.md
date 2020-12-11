@@ -1,6 +1,8 @@
 # heyjack53
 This is a script to automate the takeover process for domains that have route53 dangling nameserver records.
 
+Based on https://github.com/shivsahni/NSBrute
+
  ## Installing
 
  Clone the repo

@@ -109,8 +109,9 @@ def main():
                             route53.delete_hosted_zone(Id=zone)
 
                 except botocore.exceptions.ClientError as exception_obj:
-                    if exception_obj.response['Error']['Code'] == 'ThrottlingException':
-                        logging.warning('ThrottlingException while deleting zone. Waiting 3 seconds to continue.')
+                    if exception_obj.response['Error']['Code'] == 'Throttling':
+                        logging.warning(exception_obj.response['Error']['Message'])
+                        logging.warning('Waiting 3 seconds to continue...')
                         time.sleep(3)
                     else:
                         logging.error("Unexpected ClientError exception", exception_obj)
@@ -119,7 +120,7 @@ def main():
             else:
                 successful_zone = hosted_zone_id
                 print(f"Successful attempt after {counter} tries!!")
-                print("The hijacked zone is", hosted_zone_id)
+                print("The hijacked zone is", successful_zone)
                 hijacked = True
 
         if len(failed_zones) != 0:
@@ -129,12 +130,12 @@ def main():
     except KeyboardInterrupt:
         if len(failed_zones) != 0:
             print(f"{len(failed_zones)} were not deleted yet. Do you want to try to delete them?")
-            delete_leftover = input("Enter Y/y for yes")
+            delete_leftover = input("Enter Y/y for yes\n")
             if delete_leftover == "Y" or delete_leftover == "y":
                 for zone in failed_zones:
-                    route53.delete_hosted_zone(zone)
+                    route53.delete_hosted_zone(Id=zone)
             else:
-                print("The following zones still exist in your AWS account:")
+                print("The following stale zones still exist in your AWS account:")
                 for zone in failed_zones:
                     print(zone)
 
