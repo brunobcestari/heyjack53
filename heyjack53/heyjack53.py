@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import time
 import sys
 import logging
@@ -26,7 +28,7 @@ def parse_command_line(description):
     return args
 
 
-if __name__ == '__main__':
+def main():
     args = parse_command_line("Hey Jack!")
 
     domain = args.domain
@@ -49,6 +51,9 @@ if __name__ == '__main__':
 
     if not args.nameserver:
         whois_domain = whois.query(domain=args.domain)
+        if not whois_domain:
+            logging.error(f"{domain} does not seem to exist")
+            sys.exit(1)
         target_name_servers = whois_domain.name_servers
         if len(target_name_servers) == 0:
             logging.error(f'We could find no nameserver for {domain}. You can provide them using -ns parameter.')
@@ -136,3 +141,7 @@ if __name__ == '__main__':
     except Exception as e:
         logging.error("Unexpected exception", e)
         sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
