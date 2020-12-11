@@ -1,0 +1,4 @@
+dnspython~=2.0.0
+whois~=0.9.7
+boto3~=1.16.34
+botocore~=1.19.34
