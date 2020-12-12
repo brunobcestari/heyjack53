@@ -24,6 +24,7 @@ def parse_command_line(description):
                         help='NameServers can be listed here. Ex: -ns ns-001.awsdns-01.com ns-002.awsdns-02.com ')
     parser.add_argument('-v', '--verbose', action='store_true', help='Increase verbosity')
     parser.add_argument('-f', '--force', action='store_true', help='Force to continue if NS were already taken')
+    parser.add_argument('-y', '--yes', action='store_true', help='Automatic YES answer when prompted')
     args = parser.parse_args()
     return args
 
@@ -34,6 +35,7 @@ def main():
     domain = args.domain
     verbose = args.verbose
     force = args.force
+    auto_yes = args.yes
 
     if not domain:
         logging.error("Please, provide a domain to be hijacked!")
@@ -87,16 +89,17 @@ def main():
     print('Everything is ready!')
     print('Target Domain:', domain)
     print('Target Name Servers:', " ".join(target_name_servers))
-    proceed = ""
-    while proceed not in ['Y', 'y', 'N', 'n']:
-        proceed = input('Continue? (Y/N) \n')
 
-    if proceed in ['Y', 'y']:
-        print('\n', 80 * '-')
-        print('Starting HeyJack53!\n\n')
-    elif proceed in ['N', 'n']:
-        print('Bye bye!')
-        sys.exit(1)
+    if not auto_yes:
+        proceed = ""
+        while proceed not in ['Y', 'y', 'N', 'n']:
+            proceed = input('Continue? (Y/N) \n')
+        if proceed in ['N', 'n']:
+            print('Bye bye!')
+            sys.exit(1)
+
+    print('\n', 80 * '-')
+    print('Starting HeyJack53!\n\n')
 
     counter = 0
     created_zones = []
