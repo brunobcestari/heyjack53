@@ -25,13 +25,38 @@ def parse_command_line(description):
     parser.add_argument('-v', '--verbose', action='store_true', help='Increase verbosity')
     parser.add_argument('-f', '--force', action='store_true', help='Force to continue if NS were already taken')
     parser.add_argument('-y', '--yes', action='store_true', help='Automatic YES answer when prompted')
+    # TODO read domains from an input file
+    # TODO custom path to ~/.aws/credentials file
+    # TODO quiet parameter
+    # TODO output parameter to save the logs in a file
     args = parser.parse_args()
     return args
 
 
 def main():
-    args = parse_command_line("Hey Jack!")
 
+    print("""
+    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+    ░░░░░█░░░░█░░░█████░░░░█░░░█░░░░░░░░░░░
+    ░░░░░█░░░░█░░██░░░█░░░░█░░░█░░░░░░░░░░░
+    ░░░░░██████░░██████░░░░█████░░░░░░░░░░░
+    ░░░░░█░░░░█░░██░░░░░░░░░░░░█░░░░░░░░░░░
+    ░░░░░█░░░░█░░░████░░░░░░░███░░░░░░░░░░░
+    ░░░░░░░░░░░░░░░░░░░░░░░███░░░░░░░░░░░░░
+    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+    ░░░░███████████░░░░░░░░░░░░░░░░█░░░░░░░
+    ░░░░░░░░░██░░░░░░░░░░░░░░░░░░░░█░░█░░░░
+    ░░░░░░░░░░█░░░░░░░░░░░░░░░░░░░░█░██░░░░
+    ░░░░░░░░░░█░░░░████░░░░░████░░░███░░░░░
+    ░░░░░█░░░░█░░░█░░░░█░░░██░░░░░░███░░░░░
+    ░░░░░█░░░██░░░█░░░░█░░░█░░░░░░░█░█░░░░░
+    ░░░░░█████░░░░███████░░░████░░░█░███░░░
+    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+    """)
+
+    args = parse_command_line("Hey Jack!")
     domain = args.domain
     verbose = args.verbose
     force = args.force
