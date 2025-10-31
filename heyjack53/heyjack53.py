@@ -17,7 +17,7 @@ def parse_command_line(description):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-d', '--domain', type=str, default=None, help='Domain to be hijacked')
     parser.add_argument('-l', '--list', type=str, default=None, help='Comma-separated list of domains')
-    parser.add_argument('-f', '--file', type=str, default=None, help='File containing list of domains (one per line)')
+    parser.add_argument('-i', '--input-file', dest='file', type=str, default=None, help='File containing list of domains (one per line)')
     parser.add_argument('-p', '--profile', type=str, default=None, help='AWS profile from ~/.aws/credentials file')
     parser.add_argument('-a', '--access', type=str, default=None, help='AWS Access Key')
     parser.add_argument('-s', '--secret', type=str, default=None, help='AWS Secret Access Key')
@@ -25,7 +25,7 @@ def parse_command_line(description):
     parser.add_argument('-ns', '--nameserver', type=str, default=None, action='append', nargs='*',
                         help='NameServers can be listed here. Ex: -ns ns-001.awsdns-01.com ns-002.awsdns-02.com ')
     parser.add_argument('-v', '--verbose', action='store_true', help='Increase verbosity')
-    parser.add_argument('--force', action='store_true', help='Force to continue if NS were already taken')
+    parser.add_argument('-f', '--force', action='store_true', help='Force to continue if NS were already taken')
     parser.add_argument('-y', '--yes', action='store_true', help='Automatic YES answer when prompted')
     parser.add_argument('-c', '--check-only', action='store_true', dest='check_only', 
                         help='Only check if domain is vulnerable without attempting hijack')
@@ -48,7 +48,7 @@ def get_domains_list(args):
     
     if args.file:
         try:
-            with open(args.file, 'r') as f:
+            with open(args.file, 'r', encoding='utf-8') as f:
                 domains.extend([line.strip() for line in f 
                               if line.strip() and not line.strip().startswith('#')])
         except Exception as e:
@@ -61,7 +61,11 @@ def get_domains_list(args):
 def get_nameservers(domain, custom_nameservers=None, verbose=False):
     """Get nameservers for a domain."""
     if custom_nameservers:
-        return set(custom_nameservers[0])
+        if custom_nameservers and custom_nameservers[0]:
+            return set(custom_nameservers[0])
+        else:
+            logging.warning("Custom nameservers provided but empty")
+            return None
     
     try:
         if verbose:

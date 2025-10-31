@@ -33,7 +33,7 @@ Based on https://github.com/shivsahni/NSBrute
 
  * `-d` or `--domain` for a single domain
  * `-l` or `--list` for a comma-separated list of domains
- * `-f` or `--file` for a file containing one domain per line
+ * `-i` or `--input-file` for a file containing one domain per line
 
  ### Operation Modes
 
@@ -43,7 +43,7 @@ Based on https://github.com/shivsahni/NSBrute
  ### Additional Options
 
  * `-v` or `--verbose`: Increase verbosity
- * `--force`: Continue even if domain currently resolves
+ * `-f` or `--force`: Continue even if domain currently resolves
  * `-y` or `--yes`: Automatic YES answer when prompted
  * `-ns` or `--nameserver`: Manually specify nameservers
 
@@ -63,7 +63,7 @@ Based on https://github.com/shivsahni/NSBrute
 
  Process domains from a file:
 
-    $ heyjack53 -f domains.txt -p my_profile_name -y
+    $ heyjack53 -i domains.txt -p my_profile_name -y
 
  ## Key Improvements
 
