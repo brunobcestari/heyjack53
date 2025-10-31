@@ -62,7 +62,7 @@ def get_domains_list(args):
 
 def get_nameservers(domain, custom_nameservers=None, verbose=False):
     """Get nameservers for a domain."""
-    if custom_nameservers and custom_nameservers[0]:
+    if custom_nameservers and len(custom_nameservers) > 0 and custom_nameservers[0]:
         return set(custom_nameservers[0])
     
     try:
@@ -170,9 +170,22 @@ def attempt_hijack(domain, target_nameservers, route53_client, verbose=False):
                 else:
                     raise
             
-            hosted_zone_id = new_zone.get('HostedZone').get('Id')
+            hosted_zone = new_zone.get('HostedZone')
+            delegation_set = new_zone.get('DelegationSet')
+            
+            if not hosted_zone or not delegation_set:
+                logging.error('Invalid response from AWS - missing HostedZone or DelegationSet')
+                continue
+            
+            hosted_zone_id = hosted_zone.get('Id')
+            new_name_servers_list = delegation_set.get('NameServers')
+            
+            if not hosted_zone_id or not new_name_servers_list:
+                logging.error('Invalid response from AWS - missing Id or NameServers')
+                continue
+            
             created_zones.append(hosted_zone_id)
-            new_name_servers = set(new_zone.get('DelegationSet').get('NameServers'))
+            new_name_servers = set(new_name_servers_list)
             
             if verbose:
                 logging.info(f'Created zone {hosted_zone_id} with nameservers: {new_name_servers}')
