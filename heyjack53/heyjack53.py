@@ -61,7 +61,7 @@ def get_domains_list(args):
 def get_nameservers(domain, custom_nameservers=None, verbose=False):
     """Get nameservers for a domain."""
     if custom_nameservers:
-        if custom_nameservers and custom_nameservers[0]:
+        if custom_nameservers[0]:
             return set(custom_nameservers[0])
         else:
             logging.warning("Custom nameservers provided but empty")
@@ -300,7 +300,7 @@ def main():
     domains = get_domains_list(args)
     
     if not domains:
-        logging.error("Please provide at least one domain using -d, -l, or -f")
+        logging.error("Please provide at least one domain using -d, -l, or -i")
         sys.exit(1)
     
     logging.info(f'Found {len(domains)} domain(s) to process')
