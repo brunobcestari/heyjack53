@@ -67,7 +67,7 @@ Based on https://github.com/shivsahni/NSBrute
 
  ## Key Improvements
 
- * **Fixed nameserver matching logic**: Now correctly requires ALL target nameservers to match (using `issubset()` instead of `intersection()`)
+ * **Improved nameserver matching logic**: Now provides clearer feedback on which nameservers match (using `intersection()` to show matching nameservers)
  * **Multi-domain support**: Process multiple domains via list or file input
  * **Check-only mode**: Test vulnerability without attempting hijack
  * **Better error handling**: More robust error handling and logging
